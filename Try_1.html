@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.6.1/mapbox-gl.css' rel='stylesheet' />
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.6.1/mapbox-gl.js'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+</head>
+<body>
+    <div id="map" style="width: 100%; height: 100vh;"></div>
+    <div id="zoom-controls" class="zoom-controls">
+        <button id="zoom-in">+</button>
+        <button id="zoom-out">-</button>
+    </div>
+    <div id="filter-controls" class="filter-controls">
+        <select id="sitetype-filter">
+            <option value="all">ALL</option>
+        </select>
+        <div class="button-group">
+            <button id="color-blind-mode">Colour Blind Mode</button>
+            <button id="toggle-visibility">Visibility</button>
+        </div>
+        <div class="slider-group">
+            <input type="range" id="pollutant-slider" min="0" max="6" value="0">
+            <label id="pollutant-label">All</label>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar">
+        <h2>Point Details</h2>
+        <p id="objectid"></p>
+        <p id="siteid"></p>
+        <p id="sitename"></p>
+        <p id="latitude"></p>
+        <p id="longitude"></p>
+        <p id="url"></p>
+    </div>
+    <div id="tooltip" class="tooltip"></div>
+    <div id="scale" class="scale"></div>
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoiYXMxMDcwNDMwNjk5IiwiYSI6ImNtNzRqODQwODBhbHoycHNlMXJsMnd0djQifQ.5_ON1ZkFp8Uh76Yfqgj79A';
+        var map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v11',
+            center: [-0.1276, 51.5074], // 伦敦的经纬度
+            zoom: 10
+        });
+
+        var markers = [];
+        var sitetypes = new Set();
+        var colorBlindMode = false;
+        var visibility = true;
+        var pollutants = ['all', 'pollutant_no2', 'pollutant_pm10', 'pollutant_o3', 'pollutant_so2', 'pollutant_pm25', 'pollutant_co'];
+
+        // 读取CSV文件并解析
+        Papa.parse('Ass_Air_quality_monitoring_sites1.csv', {
+            download: true,
+            header: true,
+            complete: function(results) {
+                var data = results.data;
+                data.forEach(function(row) {
+                    var lat = parseFloat(row.latitude);
+                    var lon = parseFloat(row.longitude);
+                    var sitetype = row.sitetype;
+                    var sitename = row.sitename;
+                    var id = row.id;
+                    var objectid = row.objectid;
+                    var siteid = row.siteid;
+                    var url = row.url;
+                    var classification = row.classification;
+                    var pollutantsData = {
+                        pollutant_no2: row.pollutant_no2,
+                        pollutant_pm10: row.pollutant_pm10,
+                        pollutant_o3: row.pollutant_o3,
+                        pollutant_so2: row.pollutant_so2,
+                        pollutant_pm25: row.pollutant_pm25,
+                        pollutant_co: row.pollutant_co
+                    };
+                    if (!isNaN(lat) && !isNaN(lon)) {
+                        var el = document.createElement('div');
+                        el.className = 'marker';
+                        var marker = new mapboxgl.Marker(el)
+                            .setLngLat([lon, lat])
+                            .addTo(map);
+                        el.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            document.getElementById('objectid').textContent = `Object ID: ${objectid}`;
+                            document.getElementById('siteid').textContent = `Site ID: ${siteid}`;
+                            document.getElementById('sitename').textContent = `Site Name: ${sitename}`;
+                            document.getElementById('latitude').textContent = `Latitude: ${lat}`;
+                            document.getElementById('longitude').textContent = `Longitude: ${lon}`;
+                            document.getElementById('url').innerHTML = `URL: <a href="${url}" target="_blank">${url}</a>`;
+                            document.getElementById('sidebar').style.display = 'block';
+                        });
+                        el.addEventListener('mouseover', function(e) {
+                            var tooltip = document.getElementById('tooltip');
+                            tooltip.textContent = `Classification: ${classification}`;
+                            tooltip.style.display = 'block';
+                            tooltip.style.left = (e.pageX + 10) + 'px';
+                            tooltip.style.top = (e.pageY + 10) + 'px';
+                        });
+                        el.addEventListener('mouseout', function() {
+                            var tooltip = document.getElementById('tooltip');
+                            tooltip.style.display = 'none';
+                        });
+                        markers.push({ marker: marker, sitetype: sitetype, pollutants: pollutantsData });
+                        sitetypes.add(sitetype);
+                    }
+                });
+                updateFilterOptions();
+            }
+        });
+
+        function updateFilterOptions() {
+            var filterSelect = document.getElementById('sitetype-filter');
+            sitetypes.forEach(function(sitetype) {
+                var option = document.createElement('option');
+                option.value = sitetype;
+                option.textContent = sitetype;
+                filterSelect.appendChild(option);
+            });
+        }
+
+        document.getElementById('sitetype-filter').addEventListener('change', function() {
+            var selectedType = this.value;
+            markers.forEach(function(item) {
+                if (selectedType === 'all' || item.sitetype === selectedType) {
+                    item.marker.addTo(map);
+                } else {
+                    item.marker.remove();
+                }
+            });
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', function() {
+            map.zoomIn();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', function() {
+            map.zoomOut();
+        });
+
+        // 点击地图隐藏侧边栏
+        map.on('click', function() {
+            var sidebar = document.getElementById('sidebar');
+            if (sidebar.style.display === 'block') {
+                sidebar.style.display = 'none';
+            }
+        });
+
+        // 阻止点击侧边栏时隐藏
+        document.getElementById('sidebar').addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+
+        // 更新比例尺
+        function updateScale() {
+            var zoom = map.getZoom();
+            var scaleValue = Math.round(591657550.5 / Math.pow(2, zoom - 1));
+            document.getElementById('scale').textContent = '1:' + scaleValue;
+        }
+
+        map.on('zoom', updateScale);
+        map.on('load', updateScale);
+
+        // 切换色盲模式
+        document.getElementById('color-blind-mode').addEventListener('click', function() {
+            colorBlindMode = !colorBlindMode;
+            markers.forEach(function(item) {
+                item.marker.getElement().style.backgroundColor = colorBlindMode ? 'blue' : 'green';
+            });
+        });
+
+        // 切换点的可见性
+        document.getElementById('toggle-visibility').addEventListener('click', function() {
+            visibility = !visibility;
+            markers.forEach(function(item) {
+                if (visibility) {
+                    item.marker.addTo(map);
+                } else {
+                    item.marker.remove();
+                }
+            });
+        });
+
+        // 切换污染物显示
+        document.getElementById('pollutant-slider').addEventListener('input', function() {
+            var selectedPollutant = pollutants[this.value];
+            document.getElementById('pollutant-label').textContent = selectedPollutant === 'all' ? 'All' : selectedPollutant.toUpperCase();
+            markers.forEach(function(item) {
+                if (selectedPollutant === 'all' || item.pollutants[selectedPollutant]) {
+                    item.marker.addTo(map);
+                } else {
+                    item.marker.remove();
+                }
+            });
+        });
+    </script>
+    <style>
+        .marker {
+            background-color: green;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .zoom-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+        .zoom-controls button {
+            display: block;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: none;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        .zoom-controls button:focus {
+            outline: none;
+        }
+        .filter-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+            padding: 10px;
+        }
+        .filter-controls select {
+            width: 150px;
+            padding: 5px;
+        }
+        .button-group {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        .button-group button {
+            margin-bottom: 5px;
+            padding: 5px;
+            border: none;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .button-group button:focus {
+            outline: none;
+        }
+        .slider-group {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .slider-group input {
+            width: 100%;
+        }
+        .slider-group label {
+            margin-top: 5px;
+        }
+        .sidebar {
+            position: absolute;
+            top: 10px;
+            left: 200px;
+            width: 250px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+            padding: 10px;
+            display: none;
+        }
+        .scale {
+            position: absolute;
+            bottom: 20px; /* 调整比例尺向上移动大约1cm */
+            left: 10px;
+            background: white;
+            padding: 5px;
+            border-radius: 3px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+        .tooltip {
+            position: absolute;
+            background: white;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+            display: none;
+        }
+    </style>
+</body>
+</html>
